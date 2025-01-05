@@ -103,20 +103,29 @@ class ParadoxParser:
         glob = '*.' + file_extension
         if recursive:
             glob = '**/' + glob
-        for file in sorted((self.base_folder / folder).glob(glob)):
-            if overwrite_duplicate_toplevel_keys:
-                result.dictionary.update(self._really_parse_file(file, workarounds).dictionary)
-            else:
-                for key, value in self._really_parse_file(file, workarounds):
-                    if key in result.dictionary:
-                        if isinstance(result.dictionary[key], Tree):
-                            result.dictionary[key].dictionary.update(value)
-                        elif isinstance(result.dictionary[key], list):
-                            result.dictionary[key].append(value)
+            
+        folders = [self.base_folder, Path("D:/Freddy/Documents/Paradox Interactive/Victoria 3/mod/project-utopia")]
+
+        for base_folder in folders:
+            for file in sorted((base_folder / folder).glob(glob)):
+                parsed_file = self._really_parse_file(file, workarounds)
+                
+                # Handle merging logic based on overwrite_duplicate_toplevel_keys
+                if overwrite_duplicate_toplevel_keys:
+                    result.dictionary.update(parsed_file.dictionary)
+                else:
+                    for key, value in parsed_file.dictionary.items():
+                        if key in result.dictionary:
+                            # Special handling for 'military' or any other key that should not be in a list
+                            if isinstance(result.dictionary[key], Tree):
+                                result.dictionary[key].dictionary.update(value)
+                            elif isinstance(result.dictionary[key], list):
+                                result.dictionary[key].append(value)
+                            else:
+                                # For other types, just overwrite with a list
+                                result.dictionary[key] = [result.dictionary[key], value]
                         else:
-                            result.dictionary[key] = [result.dictionary[key], value]
-                    else:
-                        result.dictionary[key] = value
+                            result.dictionary[key] = value
         return result
 
     def parse_file(self, relative_path: str, workarounds: list[ParsingWorkaround] = None) -> 'Tree':

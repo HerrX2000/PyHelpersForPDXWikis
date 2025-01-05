@@ -7,6 +7,7 @@ from common.jomini_parser import JominiParser
 from common.paradox_parser import ParadoxParser, ParsingWorkaround, QuestionmarkEqualsWorkaround
 from vic3.vic3lib import *
 from common.paradox_lib import NameableEntity
+from pathlib import Path
 AE = TypeVar('AE', bound=AdvancedEntity)
 NE = TypeVar('NE', bound=NameableEntity)
 
@@ -30,7 +31,9 @@ class Vic3Parser(JominiParser):
 
     def __init__(self):
         super().__init__(VIC3DIR / 'game')
-        self.localization_folder_iterator = (VIC3DIR / 'game' / 'localization' / 'english').glob('**/*_l_english.yml')
+        localization_folder_1 = (VIC3DIR / 'game' / 'localization' / 'english')
+        localization_folder_2 = (Path("D:/Freddy/Documents/Paradox Interactive/Victoria 3/mod/project-utopia")  / 'localization' / 'english' )
+        self.localization_folder_iterator = list(localization_folder_1.glob('**/*_l_english.yml')) + list(localization_folder_2.glob('**/*_l_english.yml'))
 
     def parse_nameable_entities(self, folder: str, entity_class: Type[NE],
                                 extra_data_functions: dict[str, Callable[[str, Tree], any]] = None,
