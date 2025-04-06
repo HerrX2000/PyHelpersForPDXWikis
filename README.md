@@ -1,3 +1,5 @@
+RUN:  python -m vic3.PMSpreadsheet.generate_spreadsheets
+
 **PyHelpersForPDXWikis** is a tool to parse the game files of some paradox games and generate tables and other information from
 them and add it to the wiki. The current version generates the output as txt files, but future versions will allow
 automatically uploading to the wiki. The following games are supported:
