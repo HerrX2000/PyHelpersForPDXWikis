@@ -4,6 +4,7 @@ from collections import defaultdict
 from vic3.game import vic3game
 from vic3.vic3lib import PopType, Law
 from vic3.PMSpreadsheet.utils import get_display_name
+import os
 
 pop_types: dict[str, PopType] = vic3game.parser.pop_types
 laws: dict[str, Law] = vic3game.parser.laws
@@ -66,6 +67,7 @@ def get_ip_efficiency_per_law():
 
 def print_pop_type_data(dir_name: str) -> None:
     file_name = dir_name / "pop_types.txt"
+    os.makedirs(dir_name, exist_ok=True)
     file = open(file_name, 'w')
 
     headers: list[str] = [
