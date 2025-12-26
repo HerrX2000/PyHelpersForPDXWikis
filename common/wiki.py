@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 import math
@@ -37,6 +38,17 @@ class WikiTextFormatter:
         return str(number)
 
     @staticmethod
+    def format_float(number: float, max_significant_digits = 12) -> str:
+        """
+        format a float as a string without using scientific notation
+        while removing floating point artifacts and trailing zeros
+            e.g.
+                0.0000400000000000000032721221565612523818344925530254840850830078125 => 0.00004
+                0.01000000000000000020816681711721685132943093776702880859375         => 0.01
+        """
+        return f'{round(number, max_significant_digits):f}'.rstrip('0').rstrip('.')
+
+    @staticmethod
     def create_wiki_list(elements: list[str], indent=1, no_list_with_one_element=False, prefix_with_linebreak=True, format_with_icon=False) -> str:
         if len(elements) == 0:
             return ''
@@ -59,23 +71,30 @@ class WikiTextFormatter:
                     results.append(f'{line_prefix} {element}')
             return f'\n'.join(results)
 
-    @staticmethod
-    def add_red_green(number, positive_is_good: bool = True, add_plus: bool = False, add_percent: bool = False) -> str:
+    def add_red_green(self, number, positive_is_good: bool = True, add_plus: bool = False, add_percent: bool = False) -> str:
         if not isinstance(number, (int, float, Decimal)):
             return str(number)
 
         if number == 0:
+            if add_percent:
+                number = f'{number}%'
             return f"'''{number}'''"
+
         if number > 0:
             if positive_is_good:
                 color = 'green'
             else:
                 color = 'red'
+            if add_percent:
+                number = self.format_percent(number)
             if add_plus:
                 number = f'+{number}'
         else:
+            number = abs(number)
+            if add_percent:
+                number = self.format_percent(number)
             # add the unicode minus sign
-            number = f'−{abs(number)}'
+            number = f'−{number}'
             if positive_is_good:
                 color = 'red'
             else:
@@ -125,6 +144,12 @@ class WikiTextFormatter:
         return f"''“{text}”''"
 
     @staticmethod
+    def create_section_heading(title: str, heading_level: int = 2) -> str:
+        """creates '== title ==' """
+        return '=' * heading_level + f' {title} ' + '=' * heading_level
+
+
+    @staticmethod
     def join_with_comma_and_or(elements: list, seperator=', ', conjunction=" ''or'' ") -> str:
         """joins a list with separator, but the last two elements are joined with the conjunction"""
         n = len(elements)
@@ -158,6 +183,31 @@ class WikiTextFormatter:
                 result += numeral
                 number -= integer
         return result
+
+    @staticmethod
+    def strip_formatting(text, strip_newlines=False):
+        """strip HTML formatting and some common wiki syntax. Replace links by their anchor texts"""
+        allowed_characters_in_final_output = r'-—\w. \'&()!:'
+        stripped_text = re.sub(r'\[https?:[^] ]+ ([^]]+)]', r'\1', re.sub(r'\[\[([^]|]+\|)?([^]|]+)]]', r'\2', re.sub(r'<[^<]+?>', '', re.sub(r' <[^<]+?> ', ' ', text))))
+        stripped_text = re.sub(r'\{\{icon\|[^}]+}}\s*(&nbsp;)?\s*', '', stripped_text, flags=re.IGNORECASE)
+        if strip_newlines:
+            stripped_text = re.sub(r'\s*[\r\n]+\s*',' ', stripped_text)
+        else:
+            allowed_characters_in_final_output += r'\n\r'
+        if not re.fullmatch('^[' + allowed_characters_in_final_output + ']*$', stripped_text):
+            # raise Exception(f'Could not fully strip formatting from the following text "{text}". Partially stripped version: "{stripped_text}"')
+            pass
+            # print(f'Could not fully strip formatting from the following text "{text}". Partially stripped version: "{stripped_text}"')
+        # remove space from the beginning and end which might have been left over from the other stripping
+        return stripped_text.strip()
+
+    @staticmethod
+    def is_number(s: str):
+        try:
+            float(s)
+            return True
+        except ValueError:
+            return False
 
 
 # the rest of the file is an unfinished version of a better wiki-table generator

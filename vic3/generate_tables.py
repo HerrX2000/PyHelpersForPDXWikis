@@ -1,5 +1,7 @@
 import re
 import os
+from typing import Any
+
 import sys
 from collections.abc import Iterable, Sequence
 from operator import attrgetter
@@ -88,7 +90,7 @@ class TableGenerator(Vic3FileGenerator):
                 'Name': f'{{{{iconbox|{tech.display_name}|{tech.description}|image={tech.get_wiki_filename()}}}}}\n',
                 'Era': tech.era,
                 'Prerequisites': self.create_wiki_list([f'{pre_tech.get_wiki_file_tag()} [[#{pre_tech.display_name}|{pre_tech.display_name}]]' for pre_tech in tech.required_technologies]),
-                'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in tech.modifiers]),
+                'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in tech.modifier]),
                 'Unlocks': self.create_wiki_list(self.get_unlocks(tech))
             }
             for tech in self.parser.technologies.values() if tech.category == category
@@ -107,8 +109,9 @@ class TableGenerator(Vic3FileGenerator):
             'Name': f'id="{decree.name}" | {{{{iconbox|{decree.display_name}|{decree.description}|image={decree.get_wiki_filename()}}}}}',
             'Required technology': ' and '.join(
                 [tech.get_wiki_link_with_icon() for tech in decree.required_technologies]),
-            'Conditions': self.parser.formatter.format_conditions(decree.valid) if decree.valid else '',
-            'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in decree.modifiers]),
+            # 'Conditions': self.parser.formatter.format_conditions(decree.valid) if decree.valid else '',
+            'Conditions': ('Country:' + self.parser.formatter.format_conditions(decree.country_trigger)) if decree.country_trigger else '' + (('\nState:' + self.parser.formatter.format_conditions(decree.state_trigger)) if decree.state_trigger else ''),
+            'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in decree.modifier]),
 
         } for decree in sorted(self.parser.decrees.values(), key=attrgetter('display_name'))]
         table = self.make_wiki_table(decrees, table_classes=['mildtable', 'plainlist'],
@@ -131,7 +134,7 @@ class TableGenerator(Vic3FileGenerator):
         traits = [{
             'width="75px" | Type': f'id="{trait.display_name}" data-sort-value="{trait.get_wiki_filename()}" |{trait.get_wiki_file_tag("75px")}',
             'Name': trait.display_name,
-            'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in trait.modifiers]),
+            'Modifiers': self.create_wiki_list([modifier.format_for_wiki() for modifier in trait.modifier]),
             'width="30%" | States': ', '.join([state.display_name for state in trait.states]),
             'Notes': self.get_state_trait_notes(trait),
 
@@ -184,7 +187,7 @@ class TableGenerator(Vic3FileGenerator):
                                      sort_function=lambda num, state: (state['Region'], state['Name'])
                                      )
 
-        return self.get_version_header() + '\n{{clear}}\n' + table
+        return self.get_SVersion_header('table') + '\n{{clear}}\n' + table
 
     def _format_resource(self, amount: int, undiscovered_amount: int):
         if undiscovered_amount > 0 and amount > 0:
@@ -252,7 +255,7 @@ local p = {};
 
         return self.get_SVersion_header('table') + '\n' + table
 
-    def iconify(self, what: any, iconify_param: str = None) -> str:
+    def iconify(self, what: Any, iconify_param: str = None) -> str:
         if isinstance(what, list):
             return ', '.join([self.iconify(item, iconify_param) for item in what])
         if str(what).lower() == 'random':

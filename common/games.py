@@ -2,7 +2,10 @@ from aow4.game import aow4game
 from common.paradox_lib import Game
 from cs2.game import cs2game
 from eu4.eu4_file_generator import eu4game
+from eu5.game import eu5game
 from millennia.game import millenniagame
+
+from localpaths import eu4dir
 from vic3.game import vic3game
 
 # Generic game classes which have wikis, but no code implementation
@@ -177,6 +180,8 @@ class HeartsofIron4(Game):
     name = 'Hearts of Iron 4'
     short_game_name = 'hoi4'
     wiki_domain = 'hoi4.paradoxwikis.com'
+    game_path = eu4dir / '../Hearts of Iron IV'
+    launcher_settings = game_path / 'launcher-settings.json'
 
 
 hoi4game = HeartsofIron4()
@@ -249,9 +254,11 @@ aowplanetfallgame = AoWPlanetfall()
 
 # mapping of existing games by their short names
 all_games: dict[str, Game] = {game.short_game_name: game for game in [
-    eu4game, vic3game, aow4game, cs2game, millenniagame,  # actually implemented
+    eu4game, eu5game, vic3game, aow4game, cs2game, millenniagame,  # actually implemented
+    ck3game, hoi4game, stellarisgame, # limited wikimirror support
     eosgame, stagame, ck2game, aodgame, eu2game, eu3game, euromegame, hoi2game, hoi3game, steeldivisiongame,
-    tyrannygame, vic1game, vic2game, skylinesgame, ck3game, hoi4game, imperatorgame, prisonarchitectgame,
-    stellarisgame, survivingmarsgame, vtmgame, aowplanetfallgame]}
+    tyrannygame, vic1game, vic2game, skylinesgame, imperatorgame, prisonarchitectgame,
+    survivingmarsgame, vtmgame, aowplanetfallgame,
+]}
 
 

@@ -1,15 +1,12 @@
-import inspect
-import sys
-from typing import Callable, TypeVar, Type
+from typing import TypeVar, Type, Callable, Any
 
 from PyHelpersForPDXWikis.localsettings import VIC3DIR
 from common.jomini_parser import JominiParser
-from common.paradox_parser import ParadoxParser, ParsingWorkaround, QuestionmarkEqualsWorkaround
+from common.paradox_parser import QuestionmarkEqualsWorkaround, ParsingWorkaround
 from vic3.vic3lib import *
-from common.paradox_lib import NameableEntity
-from pathlib import Path
-AE = TypeVar('AE', bound=AdvancedEntity)
-NE = TypeVar('NE', bound=NameableEntity)
+from common.paradox_lib import AE
+
+Vic3AE = TypeVar('Vic3AE', bound=Vic3AdvancedEntity)
 
 
 class Vic3Parser(JominiParser):
@@ -34,132 +31,6 @@ class Vic3Parser(JominiParser):
         localization_folder_1 = (VIC3DIR / 'game' / 'localization' / 'english')
         localization_folder_2 = (Path("D:/Freddy/Documents/Paradox Interactive/Victoria 3/mod/project-utopia")  / 'localization' / 'english' )
         self.localization_folder_iterator = list(localization_folder_1.glob('**/*_l_english.yml')) + list(localization_folder_2.glob('**/*_l_english.yml'))
-
-    def parse_nameable_entities(self, folder: str, entity_class: Type[NE],
-                                extra_data_functions: dict[str, Callable[[str, Tree], any]] = None,
-                                transform_value_functions: dict[str, Callable[[any], any]] = None,
-                                entity_level: int = 0,
-                                level_headings_keys: dict[str, 0] = None,
-                                parsing_workarounds: list[ParsingWorkaround] = None) -> dict[str, NE]:
-        """parse a folder into objects which are subclasses of NameableEntity
-
-        Args:
-            folder: relative to the 'steamapps/common/Victoria 3/game' folder
-            entity_class: each entry in the files will create one of these objects. All the data will be passed as
-                          keyword arguments to the constructor. If the NameableEntity constructor is not overridden, it
-                          will turn these arguments into properties of the object
-            extra_data_functions: create extra entries in the data. For each key in this dict, the corresponding function
-                                  will be called with the name of the entity and the data dict as parameter. The return
-                                  value will be added to the data dict under the same key. 'name' and 'display_name'
-                                   can also be used as keys to change the name dnd display name of the entity
-            transform_value_functions: the functions in this dict are called with the value of the data which matches
-                                       the key of this dict. If the key is not present in the data, the function won't
-                                       be called. The function must return the new value for the data
-            entity_level: the level where the entities can be found. The default is 0 which means that the entities
-                          are on the toplevel.
-            level_headings_keys: if entity_level is bigger than 0, this map is used to add the headings of each level
-                                 as additional keys into the data dictionary. Each entry in level_headings_keys has the
-                                 key which will be used as the key in the data dictionary and the value which is the
-                                 level of the heading which should be used. 'name' can also be a key to specify where
-                                 the name comes from
-
-        Returns:
-            a dict between the name of the entity(if not specified, the top level keys in the folder is used as the
-            name) and the entity_class objects which were created from them
-        """
-        if extra_data_functions is None:
-            extra_data_functions = {}
-        if transform_value_functions is None:
-            transform_value_functions = {}
-        if level_headings_keys is None:
-            level_headings_keys = {}
-        if 'display_name' not in extra_data_functions:
-            extra_data_functions['display_name'] = lambda entity_name, entity_data: self.localize(entity_name)
-        class_attributes = inspect.get_annotations(entity_class)
-        if entity_level == 0:
-            overwrite_duplicate_toplevel_keys = True
-        else:
-            overwrite_duplicate_toplevel_keys = False
-        entities = self._get_entities_from_level(class_attributes, entity_class, extra_data_functions,
-                                                 previous_headings=[],
-                                                 transform_value_functions=transform_value_functions,
-                                                 tree=self.parser.parse_folder_as_one_file(folder,
-                                                                                           overwrite_duplicate_toplevel_keys=overwrite_duplicate_toplevel_keys,
-                                                                                           workarounds=parsing_workarounds),
-                                                 entity_level=entity_level, current_level=0,
-                                                 level_headings_keys=level_headings_keys)
-
-        return entities
-
-    def _get_entities_from_level(self, class_attributes, entity_class, extra_data_functions, previous_headings,
-                                 transform_value_functions, tree, entity_level, current_level, level_headings_keys,
-                                 conditions=None):
-        entities = {}
-        for heading, data in tree:
-            if heading == 'if':
-                entities.update(self._get_entities_from_level(class_attributes, entity_class, extra_data_functions,
-                                                              headings, transform_value_functions,
-                                                              data.filter_elements(lambda k, v: k != 'limit'),
-                                                              entity_level, current_level, level_headings_keys,
-                                                              conditions=data['limit']))
-            elif heading == 'else':
-                entities.update(self._get_entities_from_level(class_attributes, entity_class, extra_data_functions,
-                                                              headings, transform_value_functions,
-                                                              data,
-                                                              entity_level, current_level, level_headings_keys,
-                                                              conditions))
-            else:
-                headings = previous_headings.copy()
-                headings.append(heading)
-                if current_level < entity_level:
-                    entities.update(self._get_entities_from_level(class_attributes, entity_class, extra_data_functions,
-                                                                  headings, transform_value_functions, data, entity_level,
-                                                                  current_level + 1, level_headings_keys, conditions))
-                else:
-                    if isinstance(data, Tree):
-                        name, entity = self._parse_entity(class_attributes, data, entity_class,
-                                                          extra_data_functions, headings, level_headings_keys,
-                                                          transform_value_functions, conditions)
-                        entities[name] = entity
-                    else:  # assume list
-                        for entry in data:
-                            if len(entry) > 0:
-                                name, entity = self._parse_entity(class_attributes, entry, entity_class,
-                                                                  extra_data_functions, headings, level_headings_keys,
-                                                                  transform_value_functions, conditions)
-                                entities[name] = entity
-                            else:
-                                print(f'Warning: ignoring empty element in "{"|".join(headings)}"', file=sys.stderr)
-        return entities
-
-    def _parse_entity(self, class_attributes, data, entity_class, extra_data_functions, headings,
-                      level_headings_keys, transform_value_functions, conditions=None):
-        entity_values = {}
-        if 'name' in extra_data_functions:
-            name = extra_data_functions['name']('', data)
-        elif 'name' in level_headings_keys:
-            name = headings[level_headings_keys['name']]
-        else:
-            name = headings[-1]
-        for key, level in level_headings_keys.items():
-            if key != 'name':
-                entity_values[key] = headings[level_headings_keys[key]]
-                if key in transform_value_functions:
-                    entity_values[key] = transform_value_functions[key](entity_values[key])
-        for key, func in extra_data_functions.items():
-            if key != 'name':
-                entity_values[key] = func(name, data)
-        for k, v in data:
-            if k in transform_value_functions:
-                entity_values[k] = transform_value_functions[k](v)
-            elif k in class_attributes and k not in entity_values:
-                entity_values[k] = v
-        if conditions is not None:
-            if 'conditions' in class_attributes:
-                entity_values['conditions'] = conditions
-            elif 'dlc' in class_attributes:
-                entity_values['dlc'] = self.parse_dlc_from_conditions(conditions)
-        return name, entity_class(name, **entity_values)
 
     def parse_dlc_from_conditions(self, conditions: Tree):
         feature_dlc_map = {
@@ -191,10 +62,11 @@ class Vic3Parser(JominiParser):
             raise Exception(f'more than one DLC is not supported: {dlcs}')
         return dlcs[0]
 
-    def parse_advanced_entities(self, folder: str, entity_class: Type[AE],
-                                extra_data_functions: dict[str, Callable[[str, Tree], any]] = None,
-                                transform_value_functions: dict[str, Callable[[any], any]] = None
-                                ) -> dict[str, AE]:
+    def parse_advanced_entities(self, folder: str, entity_class: Type[AE], extra_data_functions: dict[str, Callable[[str, Tree], Any]] = None,
+                                transform_value_functions: dict[str, Callable[[Any], Any]] = None,
+                                localization_prefix: str = '',
+                                allow_empty_entities=False,
+                                parsing_workarounds: list[ParsingWorkaround] = None,) -> dict[str, AE]:
         """parse a folder into objects which are subclasses of AdvancedEntity
 
         See parse_nameable_entities() for a description of the arguments and return value
@@ -206,16 +78,9 @@ class Vic3Parser(JominiParser):
         """
         if extra_data_functions is None:
             extra_data_functions = {}
-        if 'icon' not in extra_data_functions:
-            extra_data_functions['icon'] = self.parse_icon
-        if 'description' not in extra_data_functions:
-            extra_data_functions['description'] = lambda name, data: self.localize(name + '_desc')
         if 'required_technologies' not in extra_data_functions:
             extra_data_functions['required_technologies'] = self.parse_technologies_section
-        if 'modifiers' not in extra_data_functions:
-            extra_data_functions['modifiers'] = self.parse_modifier_section
-        return self.parse_nameable_entities(folder, entity_class, extra_data_functions=extra_data_functions,
-                                            transform_value_functions=transform_value_functions)
+        return super().parse_advanced_entities(folder, entity_class, extra_data_functions, transform_value_functions, localization_prefix, allow_empty_entities, parsing_workarounds)
 
     @cached_property
     def formatter(self):
@@ -225,10 +90,6 @@ class Vic3Parser(JominiParser):
     @cached_property
     def defines(self):
         return self.parser.parse_folder_as_one_file('common/defines').merge_duplicate_keys()
-
-    @cached_property
-    def script_values(self):
-        return self.parser.parse_folder_as_one_file('common/script_values').merge_duplicate_keys()
 
     @cached_property
     def countries(self) -> dict[str, Country]:
@@ -242,7 +103,7 @@ class Vic3Parser(JominiParser):
                     capital_state = self.states[country_data['capital']]
                 else:
                     capital_state = None
-                countries[tag] = Country(tag, self.localize(tag), PdxColor.new_from_parser_obj(country_data['color']),
+                countries[tag] = Country(tag, self.localize(tag), self.parse_color_value(country_data['color']),
                                          country_type=country_data['country_type'], tier=country_data['tier'],
                                          capital_state=capital_state,
                                          cultures=country_data['cultures'])
@@ -384,33 +245,6 @@ class Vic3Parser(JominiParser):
                     state_populations[state_name] += create_pop['size']
         return state_populations
 
-    @cached_property
-    def modifier_types(self) -> dict[str, ModifierType]:
-        return self.parse_nameable_entities('common/modifier_type_definitions', ModifierType)
-
-    def get_modifier_type_or_default(self, modifier_name: str) -> ModifierType:
-        if modifier_name in self.modifier_types:
-            return self.modifier_types[modifier_name]
-        else:
-            # print(f'Warning: use default for unknown modifier "{modifier_name}"', file=sys.stderr)
-            modifier_type = ModifierType(modifier_name, self.localize(modifier_name))
-            if 'mortality' in modifier_name:
-                modifier_type.good = False
-                modifier_type.percent = True
-            if modifier_name.endswith('throughput_add'):
-                modifier_type.good = True
-                modifier_type.percent = True
-            self.modifier_types[modifier_name] = modifier_type
-            return modifier_type
-
-    def parse_icon(self, name, data, possible_icon_keys: list[str] = None):
-        if possible_icon_keys is None:
-            possible_icon_keys = ['icon', 'texture']
-        for icon_key in possible_icon_keys:
-            if icon_key in data:
-                return data[icon_key]
-        return ''
-
     def parse_technologies_section(self, name, data, section_name='unlocking_technologies') -> list[Technology]:
         if section_name not in data:
             return []
@@ -420,21 +254,14 @@ class Vic3Parser(JominiParser):
 
         return [self.technologies[tech_name] for tech_name in section]
 
-    def _parse_modifier_data(self, data: Tree):
-        return [Modifier(mod_name, modifier_type=self.get_modifier_type_or_default(mod_name), value=mod_value)
-                for mod_name, mod_value in data]
-
-    def parse_modifier_section(self, name, data) -> list[Modifier]:
-        if 'modifier' not in data:
-            return []
-        else:
-            return self._parse_modifier_data(data['modifier'])
+    @cached_property
+    def modifier_types(self) -> dict[str, Vic3ModifierType]:
+        return self.parse_nameable_entities('common/modifier_type_definitions', Vic3ModifierType, extra_data_functions={'parser': lambda name, data: self})
 
     @cached_property
     def named_modifiers(self) -> dict[str, NamedModifier]:
-        # Parse the first file (common/static_modifiers)
-        static_modifiers = self.parse_advanced_entities('common/static_modifiers', NamedModifier, extra_data_functions={
-            'modifiers': lambda name, data: self._parse_modifier_data(Tree({name: value for name, value in data if name != 'icon'}))
+        return self.parse_advanced_entities('common/static_modifiers', NamedModifier, extra_data_functions={
+            'modifier': lambda name, data: self._parse_modifier_data(Tree({name: value for name, value in data if name != 'icon'}))
         })
         
         # Parse the second file (common/modifier_type_definitions)
@@ -505,8 +332,6 @@ class Vic3Parser(JominiParser):
     def buildings(self) -> dict[str, Building]:
         all_buildings = self.parse_advanced_entities('common/buildings', Building,
                                                      transform_value_functions={
-                                                         'building_group': lambda building_group:
-                                                         self.building_groups[building_group],
                                                          'required_construction': lambda required_construction:
                                                          self.script_values[required_construction],
                                                      },
@@ -545,7 +370,8 @@ class Vic3Parser(JominiParser):
                      'hires_unemployed_only', 'infrastructure_usage_per_level', 'fired_pops_become_radical',
                      'pays_taxes', 'is_government_funded', 'created_by_trade_routes', 'subsidized', 'is_military',
                      'default_building', 'ignores_productivity_when_hiring',
-                     'min_productivity_to_hire', 'owns_other_buildings', 'always_self_owning' , 'has_trade_revenue' , 'company_headquarter' , 'regional_company_headquarter', 'construction_efficiency_modifier']:
+                     'min_productivity_to_hire', 'owns_other_buildings', 'always_self_owning', 'has_trade_revenue', 'company_headquarter', 'regional_company_headquarter',
+                     'construction_efficiency_modifier']:
                 entity_values[k] = v
             elif k == 'parent_group':
                 entity_values['parent_group'] = parsed_building_groups[v]
@@ -572,8 +398,6 @@ class Vic3Parser(JominiParser):
             'country_modifiers': self._parse_pm_modifiers,
             'state_modifiers': self._parse_pm_modifiers,
             'timed_modifiers': lambda modifier_list: [self.named_modifiers[modifier] for modifier in modifier_list],
-            'disallowing_laws': lambda law_list: [self.laws[law] for law in law_list],
-            'unlocking_laws': lambda law_list: [self.laws[law] for law in law_list],
         })
         del production_methods['pm_dummy']
         for pm in production_methods.values():
@@ -601,7 +425,7 @@ class Vic3Parser(JominiParser):
                                         category=data['category'],
                                         required_technologies=[],  # filled later
                                         era=int(data['era'].replace('era_', '')),
-                                        modifiers=self.parse_modifier_section(name, data),
+                                        modifier=self.parse_modifier_section(name, data),
                                         )
 
         for name, required_techs in prerequisites.items():
@@ -609,7 +433,7 @@ class Vic3Parser(JominiParser):
         return entities
 
     @cached_property
-    def technology_unlocks(self) -> dict[str, list[AE]]:
+    def technology_unlocks(self) -> dict[str, list[Vic3AE]]:
         unlocks = {tech_name: [] for tech_name in self.technologies.keys()}
         entity_dict_with_possible_tech_requirements = [self.buildings, self.laws, self.production_methods, self.decrees, self.diplomatic_actions, self.parties, self.state_traits, self.ideologies]
         for entity_dict in entity_dict_with_possible_tech_requirements:
@@ -627,9 +451,7 @@ class Vic3Parser(JominiParser):
 
     @cached_property
     def decrees(self) -> dict[str, Decree]:
-        return self.parse_advanced_entities('common/decrees', Decree, transform_value_functions={
-            'unlocking_laws': lambda law_list: [self.laws[law] for law in law_list]
-        })
+        return self.parse_advanced_entities('common/decrees', Decree)
 
     @cached_property
     def diplomatic_actions(self) -> dict[str, DiplomaticAction]:
@@ -640,7 +462,11 @@ class Vic3Parser(JominiParser):
         parties = {}
         for name, data in self.parser.parse_folder_as_one_file('common/parties'):
             parties[name] = Party(name=name,
-                                  display_name=self.localize(data['name']['first_valid']['triggered_desc'][-1]['desc']),
+                                  display_name=self.localize(
+                                      data['name']['first_valid']['triggered_desc'][-1]['desc']
+                                      if 'first_valid' in data['name']
+                                      else data['name']['desc']
+                                  ),
                                   description=self.localize(name + '_desc'),
                                   icon=data['icon']['default'],
                                   required_technologies=self.parse_technologies_section(name, data)
@@ -694,7 +520,7 @@ class Vic3Parser(JominiParser):
             'interest_group': lambda ig: self.interest_groups.get(ig),
             'ideology': self.localize,
             'culture': lambda c: self.localize((c if not isinstance(c, list) else c[-1]).removeprefix('cu:')),
-            'religion': lambda c: self.localize(c.removeprefix('rel:')),
+            'religion': lambda religion: self.localize((religion[-1] if isinstance(religion, list) else religion).removeprefix('rel:')),
             'traits': lambda traits: [self.localize(trait) for trait in traits],
         }
         template_chars = self.parse_nameable_entities(f'common/character_templates/', Character,
@@ -703,10 +529,29 @@ class Vic3Parser(JominiParser):
                                                                             'start': self._character_start,
                                                                             'end': self._character_end,
                                                                             })
+        class RandomListWorkaround(ParsingWorkaround):
+
+            def apply_to_string(self, file_contents: str):
+                next_random_list = file_contents.find('random_list')
+                while next_random_list != -1:
+                    opened_brackets = 0
+                    for i, c in enumerate(file_contents[next_random_list:]):
+                        if c == '{':
+                            opened_brackets += 1
+                        elif c== '}':
+                            opened_brackets -= 1
+                        if opened_brackets == 0 and i > 14:
+                            break
+                    old_file_contents = file_contents
+                    before = file_contents[:next_random_list]
+                    after = file_contents[next_random_list + i + 1:]
+                    file_contents = before + after
+                    next_random_list = file_contents.find('random_list')
+                return file_contents
 
         transform_value_functions['template'] = lambda template: template_chars[template]
         chars = self.parse_nameable_entities(f'common/history/characters/', Character,
-                                             parsing_workarounds=[QuestionmarkEqualsWorkaround()],
+                                             parsing_workarounds=[QuestionmarkEqualsWorkaround(), RandomListWorkaround()],
                                              entity_level=2, level_headings_keys={'country': 1},
                                              transform_value_functions=transform_value_functions,
                                              extra_data_functions={
@@ -740,3 +585,27 @@ class Vic3Parser(JominiParser):
             'law_approvals': lambda name, data: {law: approval for k, v in data if k.startswith('lawgroup_') for law, approval in v},
             'required_technologies': self._parse_technologies_from_ideology_data,
         })
+
+    @cached_property
+    def principle_groups(self) -> dict[str, PrincipleGroup]:
+        return self.parse_advanced_entities('common/power_bloc_principle_groups', PrincipleGroup)
+
+    @cached_property
+    def _principle_name_to_group_map(self) -> dict[str, PrincipleGroup]:
+        return {principle: principle_group for principle_group in self.principle_groups.values() for principle in principle_group.levels}
+
+    @cached_property
+    def _principle_name_to_level_map(self) -> dict[str, int]:
+        return {principle: level for principle_group in self.principle_groups.values() for level, principle in enumerate(principle_group.levels, start=1)}
+
+    @cached_property
+    def principles(self) -> dict[str, Principle]:
+        return self.parse_advanced_entities('common/power_bloc_principles', Principle, extra_data_functions={
+            'display_name': lambda name, data: f'{self._principle_name_to_group_map[name].display_name}{self._principle_name_to_level_map[name]}',
+            'group': lambda name, data: self._principle_name_to_group_map[name],
+            'level': lambda name, data: self._principle_name_to_level_map[name],
+        })
+
+    @cached_property
+    def religions(self) -> dict[str, Religion]:
+        return self.parse_advanced_entities('common/religions', Religion)

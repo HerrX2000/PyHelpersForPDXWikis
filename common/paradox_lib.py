@@ -1,20 +1,39 @@
 import json
 import re
+import sys
 from collections import ChainMap
+from dataclasses import dataclass
+from itertools import groupby
+
 from colormath.color_conversions import convert_color
 from colormath.color_objects import sRGBColor, HSVColor
 from enum import Flag, Enum
 from functools import cached_property, lru_cache
-from typing import Any, Callable, Dict, get_origin, get_args, get_type_hints
+from typing import Any, Callable, Dict, get_origin, get_args, get_type_hints, TypeVar
 from pathlib import Path
 
 from common.paradox_parser import Tree
+
 try:
     # when used by PyHelpersForPDXWikis
     from PyHelpersForPDXWikis.localsettings import CACHEPATH
 except:  # when used by ck2utils
     from localpaths import cachedir
     CACHEPATH = cachedir
+
+
+def unsorted_groupby(iterable, key):
+    """
+    wrapper around itertools.groupby which works even if values with the same keys are non-consecutive
+
+      iterable
+        Elements to divide into groups according to the key function.
+      key
+        A function for computing the group category for each element.
+        If the key function is not specified or is None, the element itself
+        is used for grouping.
+    """
+    return groupby(sorted(iterable, key=key), key=key)
 
 
 class Game:
@@ -28,6 +47,7 @@ class Game:
     name: str
     short_game_name: str
     game_path: Path
+    documents_path: Path
     launcher_settings: Path
     wiki_domain: str
     parser: Any
@@ -79,7 +99,19 @@ class PdxColor(sRGBColor):
             PdxColor.new_from_parser_obj(data['color'])
         """
         if isinstance(color_obj, list):
-            return cls(color_obj[0], color_obj[1], color_obj[2], is_upscaled=True)
+            if color_obj[0] <= 1.0 and color_obj[1] <= 1.0 and color_obj[2] <= 1.0 and (
+                    isinstance(color_obj[0], float) or
+                    isinstance(color_obj[1], float) or
+                    isinstance(color_obj[2], float)):
+                is_upscaled = False
+            else:
+                is_upscaled = True
+            return cls(color_obj[0], color_obj[1], color_obj[2], is_upscaled=is_upscaled)
+        elif isinstance(color_obj, Tree) and 'rgb' in color_obj:
+            if color_obj['rgb'][0] <= 1.0 and color_obj['rgb'][1] <= 1.0 and color_obj['rgb'][2] <= 1.0:
+                return cls(color_obj['rgb'][0], color_obj['rgb'][1], color_obj['rgb'][2], is_upscaled=False)
+            else:
+                return cls(color_obj['rgb'][0], color_obj['rgb'][1], color_obj['rgb'][2], is_upscaled=True)
         elif isinstance(color_obj, Tree) and 'hsv' in color_obj:
             rgb_color = convert_color(HSVColor(color_obj['hsv'][0], color_obj['hsv'][1], color_obj['hsv'][2]), sRGBColor)
             return cls(rgb_color.rgb_r * 255.0, rgb_color.rgb_g * 255.0, rgb_color.rgb_b * 255.0)
@@ -127,6 +159,10 @@ class NameableEntity:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def __repr__(self):
+        string = super().__repr__()
+        return string.replace(self.__class__.__name__, f'{self.__class__.__name__}({self.name})')
+
     def __str__(self):
         return self.display_name
 
@@ -150,6 +186,13 @@ class NameableEntity:
                 and not callable(value)
                 and not isinstance(value, cached_property)
                 }
+
+    @classmethod
+    @lru_cache(maxsize=1)
+    def all_annotations(cls) -> ChainMap:
+        """Returns a dictionary-like ChainMap that includes annotations for all
+           attributes defined in cls or inherited from superclasses."""
+        return ChainMap(*(get_type_hints(c) for c in cls.mro()))
 
 
 class IconMixin:
@@ -193,7 +236,7 @@ class IconMixin:
                 if link == 'self':
                     link = self.get_wiki_link_target()
                 link_param = f'|link={link}'
-            if size is None:
+            if size is None or size == '':
                 size_param = ''
             else:
                 size_param = f'|{size}'
@@ -230,11 +273,11 @@ class AttributeEntity:
     add_attributes is used to populate the object which in turn uses transform_value_functions and extra_data_functions and the annotations to process the data
     """
 
-    transform_value_functions: dict[str, Callable[[any], any]] = {}
+    transform_value_functions: dict[str, Callable[[Any], Any]] = {}
     """ the functions in this dict are called with the value of the data which matches
            the key of this dict. If the key is not present in the data, the function won't
            be called. The function must return the new value for the data"""
-    extra_data_functions: dict[str, Callable[[Dict[str, any]], any]] = {}
+    extra_data_functions: dict[str, Callable[[Dict[str, Any]], Any]] = {}
     """ extra_data_functions: create extra entries in the data. For each key in this dict, the corresponding function
           will be called with the name of the entity and the data dict as parameter. The return
           value will be added to the data dict under the same key"""
@@ -245,7 +288,7 @@ class AttributeEntity:
     def __contains__(self, item):
         return hasattr(self, item)
 
-    def add_attributes(self, attributes: Dict[str, any]):
+    def add_attributes(self, attributes: Dict[str, Any]):
         annotations = self.all_annotations()
         for key, value in attributes.items():
             if key in self.ignored_attributes:
@@ -276,3 +319,188 @@ class AttributeEntity:
         """Returns a dictionary-like ChainMap that includes annotations for all
            attributes defined in cls or inherited from superclasses."""
         return ChainMap(*(get_type_hints(c) for c in cls.mro()))
+
+
+
+
+class ModifierType(NameableEntity):
+    percent: bool = False
+    already_percent: bool = False  # used by ck3
+    boolean: bool = False
+    decimals: int = None
+    good: bool = None
+    neutral: bool = None
+    prefix: str = None
+    postfix: str = None
+
+    description: str
+
+    # new format
+    color: str = None
+
+    # parser: 'JominiParser' = None  # breaks all_annotations
+    parser: Any
+
+    def __init__(self, name: str, display_name: str, **kwargs):
+        super().__init__(name, display_name, **kwargs)
+        if self.decimals is not None:
+            self.decimals = self.decimals
+        if self.color == 'good':
+            self.good = True
+        if self.color == 'bad':
+            self.good = False
+        if self.color == 'neutral':
+            self.neutral = True
+        self.display_name, self.description = self._get_fully_localized_display_name_and_desc()
+
+    def _get_fully_localized_display_name_and_desc(self) -> (str, str):
+        display_name = self.parser.localize(
+            key='modifier_' + self.name,
+            # version 1.7 removed the modifier_ prefix from the localisations, but I'm not sure if that's always the case, so this code allows both
+            default=self.parser.localize(self.name))
+        display_name = self.parser.formatter.format_localization_text(display_name, [])
+        description = self.parser.localize(self.name + '_desc')
+        description = self.parser.formatter.format_localization_text(description, [])
+        return display_name, description
+
+    @cached_property
+    def icon(self):
+        icon = self.display_name
+        # remove links
+        icon = re.sub(r'\[\[([^|]*\|)?([^]|]+)[^]]*]]', r'\2', icon)
+        # remove icon tags
+        icon = re.sub(r'\{\{icon\|[^}]*}}(&nbsp;)?\s*', '', icon)
+
+        return icon
+
+    def get_color_for_value(self, value) -> str:
+        if self.good is not None and value != 0:
+            if self.boolean:
+                if value:
+                    value_for_coloring = 1
+                else:
+                    value_for_coloring = -1
+            else:
+                self.assert_number(value)
+                if self.good:
+                    value_for_coloring = value
+                else:
+                    value_for_coloring = -1 * value
+            if value_for_coloring > 0:
+                return 'green'
+            elif value_for_coloring < 0:
+                return 'red'
+
+        return '#000'
+
+    def format_value(self, value):
+        try:
+            formatted_value = self.format_value_without_color(value)
+
+            color = self.get_color_for_value(value)
+            # if color == '#000':
+            #     prefix = "'''"
+            #     postfix = "'''"
+            # else:
+            if color in ['red', 'green']:
+                prefix = f'{{{{{color}|'
+            else:
+                prefix = f'{{{{color|{color}|'
+            postfix = '}}'
+        except:
+            formatted_value = value
+            prefix = ''
+            postfix = ''
+
+        if self.postfix:
+            postfix += self.parser.formatter.format_localization_text(self.parser.localize(self.postfix), [])
+        if self.prefix:
+            prefix = self.parser.formatter.format_localization_text(self.parser.localize(self.prefix), []) + prefix
+
+        return f'{prefix}{formatted_value}{postfix}'
+
+    def format_value_without_color(self, value):
+        formatted_value = value
+        postfix = ''
+        prefix = ''
+        if type(value) == int or type(value) == float:
+            if value > 0:
+                prefix = '+'
+            if value < 0:
+                prefix = '−'  # unicode minus
+                formatted_value = abs(value)
+        if self.boolean:
+            if type(value) != bool:
+                raise Exception('Unexpected value "{}" for modifier {}'.format(value, self.name))
+            if value:
+                formatted_value = 'yes'
+            else:
+                formatted_value = 'no'
+        if self.percent:
+            self.assert_number(value)
+            formatted_value *= 100
+            postfix += '%'
+
+        if self.decimals is not None:
+            try:
+                self.assert_number(value)
+                # test if the number has more significant digits than decimals
+                if formatted_value * 10**self.decimals - int(formatted_value * 10 ** self.decimals) == 0:
+                    # if it doesn't, we show decimals precision
+                    format_string = f'{{:.{self.decimals}f}}'
+                else:
+                    # otherwise we show the full precision, but use the g formatting to remove trailing zeros
+                    format_string = f'{{:g}}'
+
+                formatted_value = format_string.format(formatted_value)
+            except:
+                pass
+
+        return f'{prefix}{formatted_value}{postfix}'
+
+    def assert_number(self, value):
+        if type(value) != int and type(value) != float:
+            raise Exception('Unexpected value "{}" for modifier {}'.format(value, self.name))
+
+
+class Modifier(NameableEntity):
+    modifier_type: ModifierType
+    value: Any
+
+    def __init__(self, name: str, modifier_type: ModifierType, value: Any):
+        super().__init__(name, modifier_type.display_name, modifier_type=modifier_type, value=value)
+
+    def format_for_wiki(self):
+        value = self.modifier_type.format_value(self.value)
+        if self.modifier_type.boolean:
+            return f'{self.display_name}: {value}'
+        else:
+            return f'{value} {self.display_name}'
+
+    def format_for_lua(self) -> list:
+        """To be passed to https://vic3.paradoxwikis.com/Module:Iconify
+
+        The output still has to be passed to a lua serializer"""
+        return [self.modifier_type.get_color_for_value(self.value), self.modifier_type.format_value_without_color(self.value), {'icon': self.modifier_type.icon}]
+
+
+class AdvancedEntity(IconEntity):
+    """Adds various extra fields. Not all of them are used by all subclasses"""
+
+    description: str = ''
+    modifier: list[Modifier] = []
+
+    def str_with_type(self) -> str:
+        return f'{self.display_name} ({self.__class__.__name__})'
+
+class GameConcept(AdvancedEntity):
+    name: str
+    display_name: str
+    description: str
+    icon: str
+    link: str
+
+
+AE = TypeVar('AE', bound=AdvancedEntity)
+NE = TypeVar('NE', bound=NameableEntity)
+ME = TypeVar('ME', bound=Modifier)

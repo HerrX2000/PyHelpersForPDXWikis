@@ -1,10 +1,12 @@
 import re
+import sys
 from functools import cached_property
 
+from common.paradox_lib import AdvancedEntity, NameableEntity
 from common.paradox_parser import Tree
 from common.wiki import WikiTextFormatter
 from vic3.vic3_file_generator import vic3game, Vic3FileGenerator
-from vic3.vic3lib import AdvancedEntity
+from vic3.vic3lib import Vic3AdvancedEntity
 
 
 class Vic3WikiTextFormatter(WikiTextFormatter):
@@ -12,12 +14,14 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
     def __init__(self):
         self.parser = vic3game.parser
 
-    def format_localization_text(self, text, concepts_in_same_article: list[str]):
+    def format_localization_text(self, text, concepts_in_same_article: list[str] = None):
         """
 
         @param text: the text which should be formatted
         @param concepts_in_same_article: these strings will use a link starting with #
         """
+        if concepts_in_same_article is None:
+            concepts_in_same_article = []
         previous_text = None
         # some concept localizations use other localizations themselves.
         # So we replace till nothing changes anymore (and hope that there is no loop)
@@ -27,15 +31,25 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
             # because it matches the [concept] formmating which comes afterwards
             text = text.replace('[Nbsp]', '&nbsp;')
             text = re.sub(
-                r"(?<!\[)\[\s*(Concept\s*\(\s*')?(?P<concept_name>[^]']*)('\s*,\s*'(?P<concept_display_string>[^']*)'\s*\))?\s*(?P<formatting>\|[l])?\s*](?!])",
+                r"(?<!\[)\[\s*(Concept\s*\(\s*')?(?P<concept_name>[^]|']*)('\s*,\s*'(?P<concept_display_string>[^']*)'\s*\))?\s*(?P<formatting>\|[leE])?\s*](?!])",
                 # r"\[\s*Concept\s*\(\s*'(?P<concept_name>[^]']*)('\s*,\s*'(?P<concept_display_string>[^']*)'\s*\))?\s*(?P<formatting>\|[l])?\s*]",
                 self.get_concept_link, text)
             text = self.resolve_nested_localizations(text)
             text = self.apply_localization_formatting(text)
-        text = re.sub(r'\[\[([^]|]+)(\|[^]]+)?]]',
-                      lambda match: '[[#{}]]'.format(match.group(1) + match.group(2))
-                      if match.group(1) in concepts_in_same_article
-                      else '[[{}]]'.format(match.group(1) + match.group(2)),
+        def make_relative_links(match: re.Match):
+            target = match.group(1)
+            if match.group(2) is not None:
+                link_name = match.group(2).removeprefix('|')
+            else:
+                link_name = target
+            if target in concepts_in_same_article:
+                return f'[[#{target}|{link_name}]]'
+            elif target == link_name:
+                return f'[[{link_name}]]'
+            else:
+                return f'[[{target}|{link_name}]]'
+
+        text = re.sub(r'\[\[([^]|]+)(\|[^]]+)?]]', make_relative_links,
                       text)
         return text
 
@@ -43,11 +57,16 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
         format_key = match.group(1).lower()
         text = match.group(2)
         replacements = {'p': '{{{{green|{}}}}}',
+                        'g': '{{{{green|{}}}}}',
                         'n': '{{{{red|{}}}}}',
+                        'r': '{{{{red|{}}}}}',
                         'bold': "'''{}'''",
                         'b': "'''{}'''",
                         'italic': "''{}''",
-                        'v': '{}'  # white
+                        'v': '{}',  # white
+                        'y': '{}',  # zero_value / white
+                        'z': '{}',  # zero_value / white
+                        'e': '{}',  # explanation_link in ck3 / TODO: this is normally blue, but we don't want to make it blue if it is a normal link, because they are already blue
                         }
         if format_key not in replacements:
             Vic3FileGenerator.warn('ignoring unknown formatting marker {} in "{}"'.format(format_key, match.group(0)))
@@ -119,6 +138,7 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
                         'paper': 'paper',
                         'porcelain': 'porcelain',
                         'radios': 'radios',
+                        'radio': 'radios',
                         'rubber': 'rubber',
                         'services': 'services',
                         'silk': 'silk',
@@ -141,6 +161,8 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
                         'acceptance_status_3': 'acceptance_status_3',
                         'acceptance_status_4': 'acceptance_status_4',
                         'acceptance_status_5': 'acceptance_status_5',
+                        'merchant_marine': 'merchant marine',
+                        'warning': 'warning',
                         }
         if icon_key not in replacements:
             Vic3FileGenerator.warn('unknown icon {} in "{}"'.format(icon_key, match.group(0)))
@@ -149,10 +171,18 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
             return '{{icon|' + replacements[icon_key] + '}}'
 
     def _replace_defines(self, match: re.Match) -> str:
-        value = self.parser.defines[match.group('category')][match.group('define')]
+        category = match.group('category')
+        define = match.group('define')
+        if category in self.parser.defines and define in self.parser.defines[category]:
+            value = self.parser.defines[category][define]
+        else:
+            Vic3FileGenerator.warn(f'unknown define "{category}.{define}" in "{match.group(0)}"')
+            return match.group(0)
         prefix = ''
         suffix = ''
         formatting = match.group('formatting')
+        if not formatting:
+            return str(value)
         if 'K' in formatting:
             value = value / 1000
             suffix = 'K'
@@ -201,7 +231,7 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
             new_text = re.sub(r'#(\S+) ([^#]+)#!', self._apply_formatting_markers, previous_text)
 
         text = re.sub(r'@([^!]*)!', self._replace_icons, new_text)
-        text = re.sub(r"\[\s*GetDefine\s*\(\s*'(?P<category>[^']*)'\s*,\s*'(?P<define>[^']*)'\s*\)\s*\|\s*(?P<formatting>[-vK0+=%]+)\s*]",
+        text = re.sub(r"\[\s*GetDefine\s*\(\s*'(?P<category>[^']*)'\s*,\s*'(?P<define>[^']*)'\s*\)\s*(\|\s*(?P<formatting>[-vK0+=%]+))?\s*]",
                       self._replace_defines, text)
         text = re.sub(r"\[\s*Get[a-zA-Z_]+\s*\(\s*'(?P<loc_key>[^']+)'\s*\).GetName\s*]",
                       lambda match: self.parser.localize(match.group('loc_key')), text)
@@ -211,19 +241,28 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
                       lambda match: self.parser.interest_groups[match.group('ig_key')].display_name, text)
         return text
 
-    def resolve_nested_localizations(self, text: str):
+    def resolve_nested_localizations(self, text: str, seen_keys = None):
+        if seen_keys is None:
+            seen_keys = set()
+        def resolve_replacement(match: re.Match):
+            key_to_replace = match.group(1)
+            if key_to_replace in seen_keys:
+                print(f'Recursive localisation "{key_to_replace}" when resolving "{text}"', file=sys.stderr)
+                return key_to_replace
+            return  self.resolve_nested_localizations(self.parser.localize(key_to_replace), seen_keys | {key_to_replace})
         previous_text = None
         new_text = text
         # some localizations use other localizations themselves.
         # so we replace till nothing changes anymore (and hope that there is no loop)
         while previous_text != new_text:
             previous_text = new_text
-            new_text = re.sub(r'\$([^$]*)\$', lambda match: self.parser.localize(match.group(1)), previous_text)
+            new_text = re.sub(r'\$([^$]*)\$', resolve_replacement, previous_text)
 
         return new_text
 
     def get_concept_link(self, match: re.Match) -> str:
-        link = self.parser.localize(match.group('concept_name'))
+        concept_name = match.group('concept_name')
+        link = self.localize_concept_name(concept_name)
         display_str = match.group('concept_display_string')
         if display_str is None:
             display_str = link
@@ -239,6 +278,13 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
         # return f'[[#{link}|{display_str}]]'
         return f'[[{link}|{display_str}]]'
 
+
+    def strip_formatting(self, text, strip_newlines=False):
+        return super().strip_formatting(self.format_localization_text(text, []), strip_newlines)
+
+    def localize_concept_name(self, concept_name):
+        return self.parser.localize(concept_name)
+
     def format_conditions(self, conditions: Tree, indent: int = 1):
         result = []
         for key, value in conditions:
@@ -248,11 +294,14 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
     def format_key_for_compound_statement(self, key):
         key_mappings = {
             'OR': 'At least one of',
-            'NOR': 'Neither of the following',
+            'NOR': 'Neither of',
+            'AND': 'All of',
+            'NOT': 'Not',
         }
         if key in key_mappings:
             return key_mappings[key]
         else:
+            # print(f'Notice: Unhandled compound key "{key}"')
             return key
 
     @cached_property
@@ -272,11 +321,10 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
                 return mapping[key]
             else:
                 value = mapping[key][1][value]
-                if isinstance(value, AdvancedEntity):
-                    value = value.get_wiki_link_with_icon()
+                value = self.format_RHS(value)
                 return mapping[key][0].format(value=value)
         else:
-            return f'{key}: {value}'
+            return f'{key}: {self.format_RHS(value)}'
 
     def format_key_value_pair(self, key: str, value, indent):
 
@@ -290,5 +338,19 @@ class Vic3WikiTextFormatter(WikiTextFormatter):
         else:
             return self.format_simple_statement(key, value)
 
+    def format_RHS(self, value) -> str:
+        if isinstance(value, str) and ':' in value:
+            typ, value_without_prefix = value.split(':')
+            match typ:
+                case 'c':
+                    value = self.parser.countries[value_without_prefix]
+                case 's':
+                    value = self.parser.states[value_without_prefix]
+                case 'rel':
+                    value = self.parser.religions[value_without_prefix]
+        if isinstance(value, Vic3AdvancedEntity):
+            value = value.get_wiki_link_with_icon()
+        elif isinstance(value, NameableEntity):
+            value = value.display_name
 
-
+        return value

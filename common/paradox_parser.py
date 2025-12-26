@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from collections.abc import Iterator, MutableMapping
 from tempfile import mkstemp
-from typing import Callable
+from typing import Callable, Any
 
 try:  # when used by PyHelpersForPDXWikis
     from PyHelpersForPDXWikis.localsettings import RAKALY_CLI
@@ -48,6 +48,13 @@ class QuestionmarkEqualsWorkaround(ParsingWorkaround):
     with
         x = y"""
     replacement_regexes = {r' \?= ': ' = '}
+
+
+class IgnoreAtVariablesWorkaround(ParsingWorkaround):
+    """ignores lines which start with code like
+        @abc = 123
+    """
+    replacement_regexes = {r'(?m)^\s*@[a-zA-Z]+[^\n]*\n?': ''}
 
 
 class ParadoxParser:
@@ -160,7 +167,7 @@ class ParadoxParser:
             return self._run_rakaly(file)
 
     def _run_rakaly(self, file: Path):
-        rakaly_result = subprocess.run([RAKALY_CLI, 'json', '--duplicate-keys', 'group', file], capture_output=True)
+        rakaly_result = subprocess.run([RAKALY_CLI, 'json', '--format', 'utf-8', '--interpolation', '--duplicate-keys', 'group', file], capture_output=True)
         if rakaly_result.returncode != 0:
             rakaly_error_message = str(rakaly_result.stderr, 'UTF-8')[:-1]  # [:-1] removes the final linebreak
             raise Exception('Error reading "{}": {}'.format(file, rakaly_error_message))
@@ -200,7 +207,7 @@ class Tree(MutableMapping):
     def keys(self):
         return self.dictionary.keys()
 
-    def get_or_default(self, key: str, default: any):
+    def get_or_default(self, key: str, default: Any):
         """Return the value for the given key or the default if the key is not in this Tree"""
         if key in self.dictionary:
             return self.dictionary[key]
@@ -243,18 +250,18 @@ class Tree(MutableMapping):
         @TODO: it might be useful to change this
         """
         for key, value in self.dictionary.items():
-            if isinstance(value, list) and isinstance(value[0], Tree):
+            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], Tree):
                 merged = Tree({})
                 for item in value:
                     merged.dictionary.update(item.dictionary)
                 self.dictionary[key] = merged
         return self
 
-    def filter_elements(self, filter_func: Callable[[str, any], bool]) -> 'Tree':
+    def filter_elements(self, filter_func: Callable[[str, Any], bool]) -> 'Tree':
         """create a new tree which only contains the elements for which filter_func returns True"""
         return Tree({k: v for k, v in self.dictionary.items() if filter_func(k, v)})
 
-    def update(self, other: 'Tree'):
+    def update(self, other: 'Tree') -> 'Tree':
         """Update the tree with the key/value pairs from other. Existing keys are handled depending on the type
         of the value:
 
@@ -288,9 +295,14 @@ class Tree(MutableMapping):
                     self.dictionary[key] = value
             else:
                 self.dictionary[key] = value
+        return self
 
     def __getstate__(self):
         return self.dictionary
 
     def __setstate__(self, state):
         self.dictionary = state
+
+    def to_dict(self) -> dict:
+        """recursively convert the tree into a dict"""
+        return {k: v.to_dict() if isinstance(v, Tree) else v for k, v in self}

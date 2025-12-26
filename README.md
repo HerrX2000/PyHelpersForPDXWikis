@@ -6,6 +6,7 @@ automatically uploading to the wiki. The following games are supported:
 
 * Age of Wonders 4(only rudimentary support for json data files)
 * Cities: Skylines II
+* Europa Universalis V
 * Millennia
 * Victoria 3
 
@@ -15,6 +16,10 @@ The main components are:
 #### ParadoxParser (common/paradox_parser.py)
 parses paradox game scripts with the help of [rakaly cli](https://github.com/rakaly/cli) and turns them into
 Tree objects(a wrapper around dict) and generic python types like list, str, int, float and bool
+
+#### JominiParser (common/jomini_parser.py)
+higher level parsing code which is shared between eu5 and vic3, most notably the functions
+`localize`, `parse_nameable_entities` and `parse_advanced_entities`
 
 #### vic3/vic3lib.py
 contains classes for many of the vic3 game entities like Country, State, Technology, Building, ProductionMethod
@@ -34,6 +39,10 @@ information, to allow some code to work for multiple games. It can be accessed v
 
 Age of Wonders 4 has the same files as vic3 in its aow4 folder. Instead of rakaly, it reads json files with a data dump.
 
+#### eu5
+
+Europa Universalis V follows the same structure as vic3
+
 #### cs2
 
 Cities Skylines II files are parsed with the help of UnityPy
@@ -50,10 +59,15 @@ the [dependencies](#Dependencies) and [configure](#Configuration) it.
 # Dependencies
 
 This project needs python version 3.10 or above (older versions might work as well). requirements.txt contains the
-needed python modules. The code for each game only uses some of the requirements.
+python modules which are needed for most games. For cs2/millennia requirements-cs2.txt/requirements-millennia.txt 
+have to be used instead. requirements-flag.txt is used for (experimental) flag_helper scripts which use 
+the game to screenshot flags.
+
 They can be installed with pip (preferably in a [venv](https://docs.python.org/3/tutorial/venv.html)):
 
     python3 -m pip install -r requirements.txt
+
+
 
 To parse the vic3 game files, the [rakaly cli](https://github.com/rakaly/cli) is used. It must be either installed somewhere
 in the PATH or the location has to be configured in the settings.
@@ -70,7 +84,7 @@ better suited to generate the needed output without too much boilerplate.
 # Configuration
 
 Copy localsettings.py.example to localsettings.py and configure the location of the game installation(s) and rakaly for
-your system. The example file describes the options.
+your system. The example file describes the options. For eu5, the language can also be changed there
 
 # Usage
 
@@ -90,6 +104,22 @@ generates tables of buildings and production methods
 
 #### aow4/generate_tables.py
 currently the only script for Age of Wonders 4. Generates several tables
+
+#### eu5/generate_lua_data.py
+
+generates most lua modules for the eu5 wiki
+
+#### eu5/generate_tables.py
+
+generates most tables for the eu5 wiki
+
+#### eu5/helper.py
+
+can generate new classes, parsers and table generators. kind of a mess. needs editing the code to use it
+
+#### eu5/script_docs_helper.py
+
+updates `eu5/script_docs_data.py`. Should be done after each major update to help with localising triggers and effects which is partially based on it
 
 #### millennia/generate_tables.py
 generates most of the tables on the wiki

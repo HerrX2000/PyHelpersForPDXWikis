@@ -6,169 +6,35 @@ import inspect
 import re
 from functools import cached_property
 from operator import attrgetter
-from typing import Any
 
-from common.paradox_lib import NameableEntity, PdxColor, IconEntity
+from common.paradox_lib import NameableEntity, PdxColor, AdvancedEntity, Modifier, ModifierType
 from common.paradox_parser import Tree
 from vic3.game import vic3game
 
 
-class ModifierType(NameableEntity):
-    percent: bool = False
-    boolean: bool = False
-    num_decimals: int = None
-    good: bool = None
-    neutral: bool = None
-    prefix: str = None
-    postfix: str = None
-
-    # new format
-    decimals: int = None
-    color: str = None
-
-    def __init__(self, name: str, display_name: str, **kwargs):
-        super().__init__(name, display_name, **kwargs)
-        if self.decimals is not None:
-            self.num_decimals = self.decimals
-        if self.color == 'good':
-            self.good = True
-        if self.color == 'bad':
-            self.good = False
-        if self.color == 'neutral':
-            self.neutral = True
-        self.display_name = self._get_fully_localized_display_name()
-
-    def _get_fully_localized_display_name(self) -> str:
-        parser = vic3game.parser
-        display_name = parser.localize(
-            key='modifier_' + self.name,
-            # version 1.7 removed the modifier_ prefix from the localisations, but I'm not sure if that's always the case, so this code allows both
-            default=parser.localize(self.name))
-        display_name = parser.formatter.format_localization_text(display_name, [])
-
-        return display_name
-
-    @cached_property
-    def icon(self):
-        icon = self.display_name
-        # remove links
-        icon = re.sub(r'\[\[[^|]*\|([^]]*)]]', r'\1', icon)
-        # remove icon tags
-        icon = re.sub(r'\{\{icon\|[^}]*}}(&nbsp;)?\s*', '', icon)
-
-        return icon
-
-    def get_color_for_value(self, value) -> str:
-        if self.good is not None and value != 0:
-            if self.boolean:
-                if value:
-                    value_for_coloring = 1
-                else:
-                    value_for_coloring = -1
-            else:
-                self.assert_number(value)
-                if self.good:
-                    value_for_coloring = value
-                else:
-                    value_for_coloring = -1 * value
-            if value_for_coloring > 0:
-                return 'green'
-            elif value_for_coloring < 0:
-                return 'red'
-
-        return '#000'
-
-    def format_value(self, value):
-        try:
-            formatted_value = self.format_value_without_color(value)
-
-            color = self.get_color_for_value(value)
-            if color in ['red', 'green']:
-                prefix = f'{{{{{color}|'
-            else:
-                prefix = f'{{{{color|{color}|'
-            postfix = '}}'
-        except:
-            formatted_value = value
-            prefix = ''
-            postfix = ''
-
-        if self.postfix:
-            postfix += vic3game.parser.formatter.format_localization_text(vic3game.parser.localize(self.postfix), [])
-        if self.prefix:
-            prefix = vic3game.parser.formatter.format_localization_text(vic3game.parser.localize(self.prefix), []) + prefix
-
-        return f'{prefix}{formatted_value}{postfix}'
-
-    def format_value_without_color(self, value):
-        formatted_value = value
-        postfix = ''
-        prefix = ''
-        if type(value) == int or type(value) == float:
-            if value > 0:
-                prefix = '+'
-            if value < 0:
-                prefix = '−'  # unicode minus
-                formatted_value = abs(value)
-        if self.boolean:
-            if type(value) != bool:
-                raise Exception('Unexpected value "{}" for modifier {}'.format(value, self.name))
-            if value:
-                formatted_value = 'yes'
-            else:
-                formatted_value = 'no'
-        if self.percent:
-            self.assert_number(value)
-            formatted_value *= 100
-            postfix += '%'
-
-        if self.num_decimals is not None:
-            try:
-                self.assert_number(value)
-                format_string = f'{{:.{self.num_decimals}f}}'
-                formatted_value = format_string.format(formatted_value)
-            except:
-                pass
-
-        return f'{prefix}{formatted_value}{postfix}'
-
-    def assert_number(self, value):
-        if type(value) != int and type(value) != float:
-            raise Exception('Unexpected value "{}" for modifier {}'.format(value, self.name))
-
-
-class Modifier(NameableEntity):
-    modifier_type: ModifierType
-    value: Any
-
-    def __init__(self, name: str, modifier_type: ModifierType, value: Any):
-        super().__init__(name, modifier_type.display_name, modifier_type=modifier_type, value=value)
-
-    def format_for_wiki(self):
-        value = self.modifier_type.format_value(self.value)
-        if self.modifier_type.boolean:
-            return f'{self.display_name}: {value}'
-        else:
-            return f'{value} {self.display_name}'
-
-    def format_for_lua(self) -> list:
-        """To be passed to https://vic3.paradoxwikis.com/Module:Iconify
-
-        The output still has to be passed to a lua serializer"""
-        return [self.modifier_type.get_color_for_value(self.value), self.modifier_type.format_value_without_color(self.value), {'icon': self.modifier_type.icon}]
-
-class AdvancedEntity(IconEntity):
+class Vic3AdvancedEntity(AdvancedEntity):
     """Adds various extra fields. Not all of them are used by all subclasses"""
 
-    description: str = ''
     required_technologies: list['Technology'] = []
-    modifiers: list[Modifier] = []
-
-    def str_with_type(self) -> str:
-        return f'{self.display_name} ({self.__class__.__name__})'
 
 
-class NamedModifier(AdvancedEntity):
+class Vic3ModifierType(ModifierType):
+
+    def _get_fully_localized_display_name_and_desc(self) -> (str, str):
+        display_name, description = super()._get_fully_localized_display_name_and_desc()
+        if display_name == self.name:
+            # modifiers which are named like state_catholic_standard_of_living_add
+            match = re.fullmatch(r'state_([^ ]*)_standard_of_living_add', self.name)
+            if match:
+                pop = match.group(1)
+                pop_loc = self.parser.localize(pop)
+                display_name = f'Standard of Living for {pop_loc} Pops'
+                if description == self.name + '_desc':
+                    description = self.parser.localize('state_standard_of_living_add_desc')
+        return display_name, description
+
+
+class NamedModifier(Vic3AdvancedEntity):
     """Modifier describes several related concepts.
     This class is for entities from the common/modifiers folder which groups together multiple modifiers and
     gives them a name, icon and description
@@ -180,7 +46,7 @@ class NamedModifier(AdvancedEntity):
         return "Modifier ''“{}”''{} giving:\n* {}".format(
                                                        self.display_name,
                                                        ' for {} weeks'.format(time_limit_weeks) if time_limit_weeks is not None else '',
-                                                       '\n* '.join([modifier.format_for_wiki() for modifier in self.modifiers]))
+                                                       '\n* '.join([modifier.format_for_wiki() for modifier in self.modifier]))
 
 
 class Good(AdvancedEntity):
@@ -246,7 +112,7 @@ class State(NameableEntity):
         return self.get_strategic_region().is_water
 
 
-class StateTrait(AdvancedEntity):
+class StateTrait(Vic3AdvancedEntity):
     def __init__(self, name: str, display_name: str,
                  disabling_technologies: list['Technology'] = None,
                  required_techs_for_colonization: list['Technology'] = None, **kwargs):
@@ -324,7 +190,7 @@ class LawGroup(NameableEntity):
         return self.law_category_wiki_pages[self.law_group_category]
 
 
-class Law(AdvancedEntity):
+class Law(Vic3AdvancedEntity):
     group: LawGroup = None
 
     def get_wiki_page_name(self) -> str:
@@ -334,7 +200,7 @@ class Law(AdvancedEntity):
         return self.get_wiki_file_tag()
 
 
-class Technology(AdvancedEntity):
+class Technology(Vic3AdvancedEntity):
     wiki_pages = {'production': 'Production technology', 'military': 'Military technology', 'society': 'Society technology'}
 
     category: str
@@ -384,6 +250,9 @@ class BuildingGroup(NameableEntity):
     min_productivity_to_hire: float = 0
     owns_other_buildings: bool = False
     always_self_owning: bool = False
+    has_trade_revenue: bool = False
+    company_headquarter: bool = False
+    regional_company_headquarter: bool = False
 
     def __init__(self, name: str, display_name: str, parent_group: 'BuildingGroup' = None, **kwargs):
         super().__init__(name, display_name)
@@ -399,7 +268,7 @@ class BuildingGroup(NameableEntity):
         return self.default_building is None
 
 
-class Building(AdvancedEntity):
+class Building(Vic3AdvancedEntity):
     building_group: BuildingGroup
     production_method_groups: list[str] = None
     required_construction: int = None
@@ -433,23 +302,11 @@ class Building(AdvancedEntity):
         return group_names
 
 
-class Law(AdvancedEntity):
-    group: LawGroup = None
-    build_from_investment_pool: list[BuildingGroup] = []
-    unlocking_laws: list['Law'] = []
-
-    def get_wiki_link(self) -> str:
-        return f'[[{self.group.get_wiki_page()}#{self.display_name}|{self.display_name}]]'
-
-    def get_wiki_icon(self) -> str:
-        return self.get_wiki_file_tag()
-
-
-class ProductionMethodGroup(AdvancedEntity):
+class ProductionMethodGroup(Vic3AdvancedEntity):
     production_methods: list[str] = None
 
 
-class ProductionMethod(AdvancedEntity):
+class ProductionMethod(Vic3AdvancedEntity):
     building_modifiers: dict[str, list[Modifier]] = {}
     country_modifiers: dict[str, list[Modifier]] = {}
     state_modifiers: dict[str, list[Modifier]] = {}
@@ -458,6 +315,8 @@ class ProductionMethod(AdvancedEntity):
     unlocking_laws: list[Law] = []
     unlocking_production_methods: list['ProductionMethod'] = []
     unlocking_religions: list[str] = []
+    unlocking_principles: list['Principle'] = []
+    replacement_if_valid: str = None
 
     @cached_property
     def groups(self) -> list[ProductionMethodGroup]:
@@ -480,9 +339,11 @@ class ProductionMethod(AdvancedEntity):
         return 'List of production methods'
 
 
-class Decree(AdvancedEntity):
+class Decree(Vic3AdvancedEntity):
     cost: int = 0
-    valid: Tree = None
+    valid: Tree = None  # old
+    country_trigger: Tree = None
+    state_trigger: Tree = None
     unlocking_laws: list[Law] = []  # currently unused
 
     def get_wiki_icon(self) -> str:
@@ -492,7 +353,7 @@ class Decree(AdvancedEntity):
         return 'Decrees'
 
 
-class DiplomaticAction(AdvancedEntity):
+class DiplomaticAction(Vic3AdvancedEntity):
     def get_wiki_icon(self) -> str:
         return self.get_wiki_file_tag()
 
@@ -503,7 +364,7 @@ class DiplomaticAction(AdvancedEntity):
         return f'Diplomacy {self.display_name.lower()}.png'
 
 
-class Party(AdvancedEntity):
+class Party(Vic3AdvancedEntity):
     def get_wiki_icon(self) -> str:
         return self.get_wiki_file_tag()
 
@@ -511,7 +372,7 @@ class Party(AdvancedEntity):
         return 'Political party'
 
 
-class Ideology(AdvancedEntity):
+class Ideology(Vic3AdvancedEntity):
     character_ideology: bool = False
     priority: int = 0
     show_in_list: bool = True
@@ -520,11 +381,16 @@ class Ideology(AdvancedEntity):
     law_approvals: dict[Law, str]
 
 
-class InterestGroup(AdvancedEntity):
+class InterestGroup(Vic3AdvancedEntity):
     def get_wiki_link_with_icon(self) -> str:
         return self.get_wiki_icon() + ' ' + self.display_name
 
-class Achievement(AdvancedEntity):
+
+class PopType(Vic3AdvancedEntity):
+    display_name_without_icon: str
+
+
+class Achievement(Vic3AdvancedEntity):
     possible: Tree
     happened: Tree
 
@@ -590,3 +456,34 @@ class Character(NameableEntity):
         if self.end is not None:
             result = f'{result} - {self.end}'
         return result
+
+
+class PrincipleGroup(Vic3AdvancedEntity):
+    blocking_identity: str = None
+    primary_for_identity: str = None
+    unlocking_identity: str = None
+    levels: list[str]
+
+
+class Principle(Vic3AdvancedEntity):
+    ai_weight: Tree
+    allows_foreign_investment_in_lower_rank: bool
+    background: str
+    incompatible_with: str
+    institution: str
+    institution_modifier: Tree
+    leader_modifier: Tree
+    member_modifier: Tree
+    non_leader_modifier: Tree
+    possible: Tree
+    power_bloc_modifier: Tree
+    remainder: list
+    visible: Tree
+
+    group: PrincipleGroup
+    level: int
+
+
+class Religion(Vic3AdvancedEntity):
+    traits: list[str]
+    taboos: list[str]
