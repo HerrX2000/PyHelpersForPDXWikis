@@ -129,11 +129,16 @@ class ParadoxParser:
             for file in sorted((base_folder / folder).glob(glob)):
                 parsed_file = self._really_parse_file(file, workarounds)
 
-                # Handle merging logic based on overwrite_duplicate_toplevel_keys
-                if overwrite_duplicate_toplevel_keys:
-                    result.dictionary.update(parsed_file.dictionary)
-                else:
-                    for key, value in parsed_file.dictionary.items():
+                for raw_key, value in parsed_file.dictionary.items():
+                    is_inject = raw_key.startswith('INJECT:')
+                    key = raw_key.removeprefix('INJECT:') if is_inject else raw_key
+
+                    if is_inject:
+                        # INJECT sections extend existing definitions instead of creating new entities.
+                        result.update(Tree({key: value}))
+                    elif overwrite_duplicate_toplevel_keys:
+                        result.dictionary[key] = value
+                    else:
                         if key in result.dictionary:
                             if isinstance(result.dictionary[key], Tree):
                                 result.dictionary[key].update(value)
