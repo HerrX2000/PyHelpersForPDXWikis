@@ -46,7 +46,7 @@ def get_pop_types_order() -> list[PopType]:
 
 
 def get_investment_pool_contributions() -> dict[str, float]:
-    base_modifiers = vic3game.parser.named_modifiers['base_values'].modifiers
+    base_modifiers = vic3game.parser.named_modifiers['base_values'].modifier
     contributions: dict[str, float] = defaultdict(float)
 
     for modifier in base_modifiers:
