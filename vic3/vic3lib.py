@@ -401,6 +401,19 @@ class InterestGroup(Vic3AdvancedEntity):
 
 
 class PopType(Vic3AdvancedEntity):
+    texture: str
+    color: PdxColor
+    strata: str
+    unemployment: bool
+    unemployment_wealth: int
+
+    can_always_hire: bool
+    start_quality_of_life: int
+    wage_weight: float
+    dependent_wage: float
+
+    political_engagement_base: float
+    political_engagement_literacy_factor: float
     display_name_without_icon: str
 
 
