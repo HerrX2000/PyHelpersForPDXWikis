@@ -28,11 +28,13 @@ class Eu5WikiTextFormatter(Vic3WikiTextFormatter):
             return self.parser.localize(f'{parameter}_focus')
         if data_function == 'GetCountry' and name_function in ['GetAdjectiveWithNoTooltip', 'GetAdjective']:
             return self.parser.localize(f'{parameter}_ADJ')
+        if data_function == 'GetCountry' and name_function in ['GetLongName', 'GetLongNameWithNoTooltip'] and parameter in self.parser.countries:
+            return self.parser.countries[parameter].long_name
         return self.parser.localize(parameter)
 
     def apply_localization_formatting(self, text: str) -> str:
         text = super().apply_localization_formatting(text)
-        text = re.sub(r"\[\s*(?P<data_function>(Show|Get)[a-zA-Z_]+)\s*\(\s*'(?P<loc_key>[^']+)'\s*\)(.(?P<name_function>(GetNameWithNoTooltip|GetLongNameWithNoTooltip|GetShortNameWithNoTooltip|GetAdjectiveWithNoTooltip|GetAdjective)))?\s*]",
+        text = re.sub(r"\[\s*(?P<data_function>(Show|Get)[a-zA-Z_]+)\s*\(\s*'(?P<loc_key>[^']+)'\s*\)(.(?P<name_function>(GetNameWithNoTooltip|GetLongNameWithNoTooltip|GetLongName|GetShortNameWithNoTooltip|GetAdjectiveWithNoTooltip|GetAdjective)))?\s*]",
                       lambda match: self._resolve_data_function(match.group('data_function'), match.group('loc_key'), match.group('name_function')), text)
 
         return text
@@ -89,6 +91,24 @@ class Eu5WikiTextFormatter(Vic3WikiTextFormatter):
             return ''
         return self.format_trigger(effect)
 
+    def format_key_value_pair(self, key: str, value, indent):
+        comparison_operators = {
+            'LESS_THAN': '<',
+            'LESS_THAN_EQUAL': '≤',
+            '=': '=',
+            'NOT_EQUAL': 'is not',
+            'GREATER_THAN': '>',
+            'GREATER_THAN_EQUAL': '≥'
+        }
+        if isinstance(value, Tree) and len(value) == 1 and list(value.keys())[0] in comparison_operators:
+            for comparison_str, comparison_value in value:
+                comparison_operator = comparison_operators[comparison_str]
+                if key.startswith('societal_value:'):
+                    typ, _, key_without_prefix = key.partition(':')
+                    return self.parser.societal_values[key_without_prefix].format(comparison_value, comparison_operator)
+
+        return super().format_key_value_pair(key, value, indent)
+
     def format_simple_statement(self, key, value):
         return f'{key}: {self.format_RHS(value)}'
 
@@ -105,13 +125,13 @@ class Eu5WikiTextFormatter(Vic3WikiTextFormatter):
                 'estate_privilege': self.parser.estate_privileges,
                 'estate_type': self.parser.estates,
                 'goods': self.parser.goods,
-                'languages': self.parser.languages,
+                'language': self.parser.languages,
                 'law': self.parser.laws,
                 'policy': self.parser.law_policies,
                 'religion': self.parser.religions,
                 'religion_group': self.parser.religion_groups,
             }
-            if typ in type_sources:
+            if typ in type_sources and value_without_prefix_and_suffix in type_sources[typ]:
                 value = type_sources[typ][value_without_prefix_and_suffix]
             else:
                 suffix = None  # we use the unchanged value, so we don't want to add the suffix to it

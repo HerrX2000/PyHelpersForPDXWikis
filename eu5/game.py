@@ -42,14 +42,45 @@ class EuropaUniversalisV(Game):
         """the branch from caesar_branch.txt. This is not a good indication of a version number, but there isn't a good way to extract one right now"""
         config_path = self.game_path / 'caesar_branch.txt'
         with open(config_path, 'r') as config_file:
-            return config_file.read().removeprefix('release/')
+            branch = config_file.read().removeprefix('release/')
+        if branch == '1.1.0' or 'ud008' in  branch:
+            version_by_rev = {
+                'dc27a2531a681cb9f00ea1f0dd7d885840c68c46': '1.1.9',
+                'bb626854c1e562fddec318a5a433fb1e4840edf1': '1.1.10',
+                'd4ac783b726c725e30128d9fc2cda2d8ff382c44': '1.2.0',
+                '84ef593274f81edadcf87e0acd86da157ea11a47': '1.2.1',
+                'c85ad4c466c1d832293751c7ce21df98f1a7c0d2': '1.2.2',
+                'a6fa0cc8ffdf63f99aa78c380b6e85691851bbc8': '1.2.3',
+            }
+            if self.revision in version_by_rev:
+                return version_by_rev[self.revision]
+            else:
+                raise Exception('Specify the real version in version_by_rev')
+        return branch
 
     @cached_property
     def full_version(self):
         """the build revision from caesar_rev.txt"""
+        return self.version + '-' + self.revision
+
+    @cached_property
+    def revision(self):
         config_path = self.game_path / 'caesar_rev.txt'
         with open(config_path, 'r') as config_file:
-            return self.version + '-' + config_file.read()
+            return config_file.read()
+
+    @cached_property
+    def checksum(self) -> str | None:
+        checksum_by_rev = {
+            'd4ac783b726c725e30128d9fc2cda2d8ff382c44': '5be7', # 1.2.0
+            '84ef593274f81edadcf87e0acd86da157ea11a47': 'e429', # 1.2.1
+            'c85ad4c466c1d832293751c7ce21df98f1a7c0d2': 'fb04', # 1.2.2
+            'a6fa0cc8ffdf63f99aa78c380b6e85691851bbc8': '6a4a', # 1.2.3
+        }
+        if self.revision in checksum_by_rev:
+            return checksum_by_rev[self.revision]
+        else:
+            return super().checksum
 
 
 eu5game = EuropaUniversalisV()

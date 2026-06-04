@@ -57,6 +57,18 @@ class IgnoreAtVariablesWorkaround(ParsingWorkaround):
     replacement_regexes = {r'(?m)^\s*@[a-zA-Z]+[^\n]*\n?': ''}
 
 
+class ScriptedWorkaround(ParsingWorkaround):
+    """
+    replaces
+        scripted_effect minor_earthquake_payment = {
+    with
+        scripted_effect = { id = minor_earthquake_payment
+    """
+    replacement_regexes = {
+        r'(?m)^scripted_(effect|trigger)\s+([^\s={}#]+)\s*=\s*\{': r'scripted_\1 = { id = \2',
+    }
+
+
 class ParadoxParser:
     """the parse_ methods parse paradox development studio game scripts into python objects"""
 
@@ -110,26 +122,24 @@ class ParadoxParser:
         glob = '*.' + file_extension
         if recursive:
             glob = '**/' + glob
-            
+                
         folders = [self.base_folder, Path("D:/Freddy/Documents/Paradox Interactive/Victoria 3/mod/project-utopia")]
 
         for base_folder in folders:
             for file in sorted((base_folder / folder).glob(glob)):
                 parsed_file = self._really_parse_file(file, workarounds)
-                
+
                 # Handle merging logic based on overwrite_duplicate_toplevel_keys
                 if overwrite_duplicate_toplevel_keys:
                     result.dictionary.update(parsed_file.dictionary)
                 else:
                     for key, value in parsed_file.dictionary.items():
                         if key in result.dictionary:
-                            # Special handling for 'military' or any other key that should not be in a list
                             if isinstance(result.dictionary[key], Tree):
-                                result.dictionary[key].dictionary.update(value)
+                                result.dictionary[key].update(value)
                             elif isinstance(result.dictionary[key], list):
                                 result.dictionary[key].append(value)
                             else:
-                                # For other types, just overwrite with a list
                                 result.dictionary[key] = [result.dictionary[key], value]
                         else:
                             result.dictionary[key] = value
@@ -171,10 +181,10 @@ class ParadoxParser:
         if rakaly_result.returncode != 0:
             rakaly_error_message = str(rakaly_result.stderr, 'UTF-8')[:-1]  # [:-1] removes the final linebreak
             raise Exception('Error reading "{}": {}'.format(file, rakaly_error_message))
-        return self._parse_json(rakaly_result.stdout)
+        return self.json_to_tree(rakaly_result.stdout)
 
-    def _parse_json(self, rakaly_result: str) -> 'Tree':
-        return json.loads(rakaly_result, object_hook=lambda x: Tree(x))
+    def json_to_tree(self, json_string: str) -> 'Tree':
+        return json.loads(json_string, object_hook=lambda x: Tree(x))
 
 
 class Tree(MutableMapping):
@@ -274,6 +284,8 @@ class Tree(MutableMapping):
                 if isinstance(value, Tree):
                     if isinstance(self[key], Tree):
                         self[key].update(value)
+                    elif isinstance(self[key], list) and len(self[key]) == 0:
+                        self[key] = value
                     else:
                         raise Exception(f'mismatching types for key "{key}" when updating tree. The value from this tree is a "{type(self[key])}" and the value from the other tree is a "{type(value)}".')
                 elif isinstance(value, MutableMapping):
@@ -303,6 +315,35 @@ class Tree(MutableMapping):
     def __setstate__(self, state):
         self.dictionary = state
 
+    def _to_dict_one_value(self, value: Any) -> Any:
+        if isinstance(value, Tree):
+            return value.to_dict()
+        elif isinstance(value, list):
+            return [self._to_dict_one_value(v) for v in value]
+        else:
+            return value
+
     def to_dict(self) -> dict:
         """recursively convert the tree into a dict"""
-        return {k: v.to_dict() if isinstance(v, Tree) else v for k, v in self}
+        return {k: self._to_dict_one_value(v) for k, v in self}
+
+    def _lowercase(self, obj):
+        """ Make dictionary lowercase
+            from: https://stackoverflow.com/a/40789531
+         """
+        if isinstance(obj, dict):
+            return {k.lower(): self._lowercase(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, set, tuple)):
+            t = type(obj)
+            return t(self._lowercase(o) for o in obj)
+        elif isinstance(obj, str):
+            return obj.lower()
+        else:
+            return obj
+
+    def is_equal_to_dict(self, comparison_dict: dict, case_sensitive = False) -> bool:
+        self_dict = self.to_dict()
+        if not case_sensitive:
+            self_dict = self._lowercase(self_dict)
+            comparison_dict = self._lowercase(comparison_dict)
+        return self_dict == comparison_dict
