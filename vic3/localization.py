@@ -10,4 +10,6 @@ class Vic3Localizer(JominiLocalizer):
                              }
 
     def __init__(self, game_path: Path):
-        self.localization_folder_iterator = (game_path / 'game' / 'localization' / 'english').glob('**/*_l_english.yml')
+        game_loc_files = sorted((game_path / 'game' / 'localization' / 'english').glob('**/*_l_english.yml'))
+        mod_loc_files = sorted(Path('D:/Freddy/Documents/Paradox Interactive/Victoria 3/mod/project-utopia/localization/english').glob('**/*_l_english.yml'))
+        self.localization_folder_iterator = [*game_loc_files, *mod_loc_files]
